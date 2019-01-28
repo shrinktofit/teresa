@@ -1,7 +1,0 @@
-
-#include <thread>
-
-namespace greate
-{
-
-}
