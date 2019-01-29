@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <functional>
 #include <utility>
+#include <charconv>
 
 static_assert(sizeof(std::intptr_t) <= sizeof(std::int64_t));
 
@@ -19,6 +20,23 @@ struct node_compatible
 };
 
 extern std::list<node_compatible*> node_objects;
+
+template <typename Ty>
+struct is_node_array
+    :public std::false_type
+{
+
+};
+
+template <typename Ty>
+struct is_node_array<std::vector<Ty>>
+    :public std::true_type
+{
+
+};
+
+template <typename Ty>
+constexpr bool is_node_array_v = is_node_array<Ty>::value;
 
 template <typename Ty>
 class node_ptr
@@ -177,6 +195,14 @@ struct is_typed_array<typed_array<Ty>>
 template <typename Ty>
 constexpr bool is_typed_array_v = is_typed_array<Ty>::value;
 
+struct data_view
+{
+    void *data = nullptr;
+    std::size_t size = 0;
+    std::size_t offset = 0;
+    array_buffer underlying_buffer;
+};
+
 struct global_napi_callback_data {
     std::function<napi_value(napi_env, napi_callback_info)> unpacker;
 };
@@ -188,13 +214,10 @@ extern std::list<global_napi_callback_data_t*> global_napi_callback_datas;
 napi_value global_napi_callback(napi_env env_, napi_callback_info callback_info_);
 
 template <typename ...Tys, std::size_t ...Is>
-void _read_node_function_args_impl(napi_env env_, napi_value *args_, std::tuple<Tys...> &result_, std::index_sequence<Is...>)
+std::tuple<Tys...> _read_node_function_args_impl(napi_env env_, napi_value *args_, std::index_sequence<Is...>)
 {
     using Result = std::tuple<Tys...>;
-    auto extractOne = [&](napi_env env_, napi_value arg_, auto &ret_) {
-        ret_ = read_node_value<std::decay_t<decltype(ret_)>>(env_, arg_);
-    };
-    (extractOne(env_, args_[Is], std::get<Is>(result_)), ...);
+    return std::make_tuple(read_node_value<std::tuple_element_t<Is, Result>>(env_, args_[Is])...);
 }
 
 template <typename ...Args>
@@ -210,9 +233,7 @@ std::tuple<Args...> _read_node_function_args(napi_env env_, napi_callback_info c
         napi_throw_error(env_, nullptr, "Unmatched arguments count.");
     }
 
-    std::tuple<Args...> result;
-    _read_node_function_args_impl(env_, args.data(), result, std::index_sequence_for<Args...>());
-    return result;
+    return _read_node_function_args_impl<Args...>(env_, args.data(), std::index_sequence_for<Args...>());
 }
 
 template <typename ReturnTy, typename ...Args>
@@ -286,54 +307,75 @@ napi_value _create_node_method(napi_env env_, ReturnTy (ThisTy::*fx_)(Args...))
 template <typename Ty>
 Ty read_node_value(napi_env env_, napi_value value_)
 {
-    Ty result;
-    if constexpr (std::is_same_v<Ty, std::int64_t>) {
-        napi_get_value_int64(env_, value_, &result);
+    if constexpr (std::is_integral_v<Ty>) {
+        auto type = napi_valuetype::napi_null;
+        napi_typeof(env_, value_, &type);
+        if (type == napi_valuetype::napi_number) {
+            std::int64_t i;
+            napi_get_value_int64(env_, value_, &i);
+            // TODO: napi_get_value_int32(env_, value_, &result);
+            // TODO: napi_get_value_uint32(env_, value_, &result);
+            return static_cast<Ty>(i);
+        }
+        else if (type == napi_valuetype::napi_boolean) {
+            bool b = false;
+            napi_get_value_bool(env_, value_, &b);
+            return static_cast<Ty>(b);
+        }
+        else if (type == napi_valuetype::napi_string) {
+            Ty i;
+            auto str = read_node_value<std::string>(env_, value_);
+            auto [p, ec] = std::from_chars(str.c_str(), str.c_str() + str.size(), i);
+            if (ec == std::errc()) {
+                napi_throw_error(env_, nullptr, "Type mismatch, failed to convert string to integral.");
+            }
+        }
+        else {
+            napi_throw_error(env_, nullptr, "Type mismatch, expect type convertiable to integral.");
+        }
     }
-    else if constexpr (std::is_same_v<Ty, std::int32_t>) {
-        napi_get_value_int32(env_, value_, &result);
-    }
-    else if constexpr (std::is_same_v<Ty, std::uint32_t>) {
-        napi_get_value_uint32(env_, value_, &result);
-    }
-    else if constexpr (std::is_same_v<Ty, bool>) {
-        napi_get_value_bool(env_, value_, &result);
-    }
-    else if constexpr (std::is_integral_v<Ty>) {
-        std::int64_t i;
-        napi_get_value_int64(env_, value_, &i);
-        result = static_cast<Ty>(i);
-    }
-    else if constexpr (std::is_same_v<Ty, float>) {
-        double v = 0;
-        napi_get_value_double(env_, value_, &v);
-        return static_cast<float>(v);
-    }
-    else if constexpr (std::is_same_v<Ty, double>) {
-        napi_get_value_double(env_, value_, &result);
+    else if constexpr (std::is_floating_point_v<Ty>) {
+        double d = 0;
+        napi_get_value_double(env_, value_, &d);
+        return static_cast<Ty>(d);
     }
     else if constexpr (std::is_same_v<Ty, std::string>) {
         std::vector<char> buf(512);
         std::size_t actualLength = 0;
-        napi_get_value_string_utf8(env_, value_, buf.data(), buf.size(), &actualLength, &result);
-        result.assign(buf.data(), buf.data() + actualLength);
+        napi_get_value_string_utf8(env_, value_, buf.data(), buf.size(), &actualLength);
+        return Ty(buf.data(), buf.data() + actualLength);
     }
     else if constexpr (is_node_ptr_v<Ty>)
     {
         using ThisTy = typename Ty::value_type;
         ThisTy *this_ = nullptr;
         read_node_property<ThisTy*>(env_, value_, this_, node_compatible::native_handle_property_name);
-        result = Ty(this_);
+        return Ty(this_);
     }
     else if constexpr (std::is_same_v<Ty, array_buffer>) {
+        Ty result;
         bool isArrayBuffer = false;
         napi_is_arraybuffer(env_, value_, &isArrayBuffer);
         if (!isArrayBuffer) {
-            throw std::runtime_error("Type mismatch.");
+            napi_throw_error(env_, nullptr, "Type mismatch, expecte ArrayBuffer.");
         }
         napi_get_arraybuffer_info(env_, value_, &result.data, &result.size);
+        return result;
+    }
+    else if constexpr (std::is_same_v<Ty, data_view>) {
+        Ty result;
+        bool isDataView = false;
+        napi_is_dataview(env_, value_, &isDataView);
+        if (!isDataView) {
+            napi_throw_error(env_, nullptr, "Type mismatch, expect DataView.");
+        }
+        napi_value ab = nullptr;
+        napi_get_dataview_info(env_, value_, &result.size, &result.data, &ab, &result.offset);
+        result.underlying_buffer = read_node_value<array_buffer>(env_, ab);
+        return result;
     }
     else if constexpr (is_typed_array_v<Ty>) {
+        Ty result;
         bool isTypedArray = false;
         napi_is_typedarray(env_, value_, &isTypedArray);
         if (!isTypedArray) {
@@ -344,21 +386,21 @@ Ty read_node_value(napi_env env_, napi_value value_)
         void *dataNoType = nullptr;
         napi_get_typedarray_info(env_, value_, &type, &result.size, &dataNoType, &ab, &result.offset);
         if (!check_typed_array_type<typename Ty::element_type>(type)) {
-            throw std::runtime_error("Element type mismatch.");
+            napi_throw_error(env_, nullptr, "Element type mismatch.");
         }
         result.data = reinterpret_cast<typename Ty::element_type*>(dataNoType);
         result.underlying_buffer = read_node_value<array_buffer>(env_, ab);
+        return result;
     }
     else if constexpr (std::is_pointer_v<Ty>) {
         std::int64_t i = 0;
         napi_get_value_int64(env_, value_, &i);
-        result = reinterpret_cast<Ty>(static_cast<std::intptr_t>(i));
+        return reinterpret_cast<Ty>(static_cast<std::intptr_t>(i));
     }
     else
     {
         static_assert(false, "Unknown type.");
     }
-    return result;
 }
 
 template <typename Ty>
@@ -368,7 +410,10 @@ void read_node_property(napi_env env_, napi_value value_, Ty &result_, const cha
     napi_value keyName;
     napi_create_string_utf8(env_, propertyName.c_str(), propertyName.size(), &keyName);
     napi_value property = nullptr;
-    napi_get_property(env_, value_, keyName, &property);
+    auto status = napi_get_property(env_, value_, keyName, &property);
+    if (status != napi_status::napi_ok) {
+        throw std::runtime_error("Property read failed.");
+    }
     result_ = read_node_value<Ty>(env_, property);
 }
 
@@ -398,6 +443,13 @@ napi_value create_node_value(napi_env env_, const Ty &value_)
     }
     else if constexpr (std::is_same_v<Ty, std::string>) {
         napi_create_string_utf8(env_, value_.c_str(), value_.size(), &result);
+    }
+    else if constexpr (is_node_array_v<Ty>) {
+        napi_create_array_with_length(env_, value_.size(), &result);
+        using ElementType = typename Ty::value_type;
+        for (std::size_t i = 0; i < value_.size(); ++i) {
+            napi_set_element(env_, result, i, create_node_value<ElementType>(env_, value_[i]));
+        }
     }
     else if constexpr (is_node_ptr_v<Ty>) {
         napi_create_object(env_, &result);

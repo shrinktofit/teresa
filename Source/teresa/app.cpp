@@ -2,6 +2,7 @@
 #include "app.h"
 #include <glad/glad.h>
 #include <iostream>
+#include <variant>
 
 namespace webgl
 {
@@ -29,50 +30,79 @@ namespace webgl
     struct Object
         :public node_compatible
     {
+    public:
         GLuint gl_handle;
+
+        Object(GLuint gl_handle_)
+            :gl_handle(gl_handle_)
+        {
+
+        }
+
+        void to_node(napi_env env_, napi_value object_) const
+        {
+            node_compatible::to_node(env_, object_);
+            set_node_property(env_, object_, u8"gl_handle_", gl_handle);
+        }
     };
 
     struct Buffer
         :public Object
     {
-
+    public:
+        using Object::Object;
     };
+    std::list<node_ptr<Buffer>> buffers;
 
     struct Framebuffer
         :public Object
     {
-
+        using Object::Object;
     };
+    std::list<node_ptr<Framebuffer>> framebuffers;
 
     struct Program
         :public Object
     {
     public:
+        using Object::Object;
     };
+    std::list<std::unique_ptr<Program>> programs;
 
     struct Renderbuffer
         :public Object
     {
-
+        using Object::Object;
     };
+    std::list<node_ptr<Renderbuffer>> renderbuffers;
 
     struct Shader
         :public Object
     {
     public:
+        using Object::Object;
     };
+    std::list<node_ptr<Shader>> shaders;
 
     struct Texture
         :public Object
     {
     public:
+        using Object::Object;
     };
+    std::list<node_ptr<Texture>> textures;
 
     struct UniformLocation
         :public node_compatible
     {
     public:
-        GLuint gl_location;
+        UniformLocation(GLint gl_location_)
+            :gl_location(gl_location_)
+        {
+
+        }
+
+        GLint gl_location;
     };
 
     struct ActiveInfo
@@ -83,16 +113,22 @@ namespace webgl
         std::string name;
     };
 
-    // [WebGLHandlesContextLoss]
+    struct ShaderPrecisionFormat
+        :public node_compatible
+    {
+        GLint rangeMin;
+        GLint rangeMax;
+        GLint precision;
+    };
+
     node_ptr<ContextAttributes> getContextAttributes()
     {
-
+        return make_node_ptr<ContextAttributes>();
     }
 
-    // [WebGLHandlesContextLoss]
     bool isContextLost()
     {
-
+        return false;
     }
 
     std::vector<std::string> getSupportedExtensions()
@@ -100,7 +136,7 @@ namespace webgl
         return {};
     }
 
-    napi_value getExtension(const std::string &name)
+    napi_value getExtension(std::string name)
     {
         return nullptr;
     }
@@ -115,7 +151,7 @@ namespace webgl
         glAttachShader(program->gl_handle, shader->gl_handle);
     }
 
-    void bindAttribLocation(node_ptr<Program> program, GLuint index, const std::string &name)
+    void bindAttribLocation(node_ptr<Program> program, GLuint index, std::string name)
     {
         glBindAttribLocation(program->gl_handle, index, name.c_str());
     }
@@ -165,25 +201,19 @@ namespace webgl
         glBlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
     }
 
-    void bufferData(GLenum target, GLsizeiptr size, GLenum usage)
-    {
-        glBufferData(target, size, nullptr, usage);
-    }
-
-    void bufferData(GLenum target, BufferSource data, GLenum usage)
+    void bufferData(GLenum target, data_view data, GLenum usage)
     {
         glBufferData(target, data.size, data.data, usage);
     }
 
-    void bufferSubData(GLenum target, GLintptr offset, BufferSource data)
+    void bufferSubData(GLenum target, GLintptr offset, data_view data)
     {
         glBufferSubData(target, offset, data.size, data.data);
     }
 
-    // [WebGLHandlesContextLoss]
     GLenum checkFramebufferStatus(GLenum target)
     {
-        glCheckFramebufferStatus(target);
+        return glCheckFramebufferStatus(target);
     }
 
     void clear(GLbitfield mask)
@@ -216,14 +246,14 @@ namespace webgl
         glCompileShader(shader->gl_handle);
     }
 
-    void compressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, ArrayBufferView data)
+    void compressedTexImage2D(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, data_view data)
     {
-        glCompressedTexImage2D(target, level, internalformat, width, height, border, );
+        glCompressedTexImage2D(target, level, internalformat, width, height, border, data.size, data.data);
     }
 
-    void compressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, ArrayBufferView data)
+    void compressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, data_view data)
     {
-        static_assert(false);
+        glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, data.size, data.data);
     }
 
     void copyTexImage2D(GLenum target, GLint level, GLenum internalformat, GLint x, GLint y, GLsizei width, GLsizei height, GLint border)
@@ -240,40 +270,47 @@ namespace webgl
     {
         GLuint h;
         glCreateBuffers(1, &h);
-        return make_node_ptr<Buffer>(h);
+        auto result = make_node_ptr<Buffer>(h);
+        return result;
     }
 
     node_ptr<Framebuffer> createFramebuffer()
     {
         GLuint h;
         glCreateFramebuffers(1, &h);
-        return make_node_ptr<Framebuffer>(h);
+        auto result = make_node_ptr<Framebuffer>(h);
+        return result;
     }
 
     node_ptr<Program> createProgram()
     {
         GLuint h = glCreateProgram();
-        return make_node_ptr<Program>(h);
+        auto result = make_node_ptr<Program>(h);
+        return result;
     }
 
     node_ptr<Renderbuffer> createRenderbuffer()
     {
         GLuint h;
         glCreateRenderbuffers(1, &h);
-        return make_node_ptr<Renderbuffer>(h);
+        auto result = make_node_ptr<Renderbuffer>(h);
+        return result;
     }
 
     node_ptr<Shader> createShader(GLenum type)
     {
         GLuint h = glCreateShader(type);
-        return make_node_ptr<Shader>(h);
+        auto result = make_node_ptr<Shader>(h);
+        shaders.push_back(result);
+        return result;
     }
 
     node_ptr<Texture> createTexture()
     {
         GLuint h;
         glCreateTextures(GL_TEXTURE_2D, 1, &h);
-        return make_node_ptr<Texture>(h);
+        auto result = make_node_ptr<Texture>(h);
+        return result;
     }
 
     void cullFace(GLenum mode)
@@ -351,7 +388,6 @@ namespace webgl
         glDrawElements(mode, count, type, reinterpret_cast<const void*>(offset));
     }
 
-
     void enable(GLenum cap)
     {
         glEnable(cap);
@@ -387,7 +423,6 @@ namespace webgl
         glFrontFace(mode);
     }
 
-
     void generateMipmap(GLenum target)
     {
         glGenerateMipmap(target);
@@ -395,113 +430,177 @@ namespace webgl
 
     node_ptr<ActiveInfo> getActiveAttrib(node_ptr<Program> program, GLuint index)
     {
+        GLint len = 0;
+        glGetProgramiv(program->gl_handle, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &len);
+        std::vector<char> buffer(len);
+
         ActiveInfo activeInfo;
-        glGetActiveAttrib(program->gl_handle, index, , , &activeInfo.size, &activeInfo.type, );
+        glGetActiveAttrib(program->gl_handle, index, buffer.size(), &len, &activeInfo.size, &activeInfo.type, buffer.data());
+        activeInfo.name = std::string(buffer.begin(), buffer.end());
+        return make_node_ptr<ActiveInfo>(activeInfo);
     }
 
     node_ptr<ActiveInfo> getActiveUniform(node_ptr<Program> program, GLuint index)
     {
-        glGetActiveUniform(program->gl_handle, index, , , &activeInfo.size, &activeInfo.type, );
+        GLint len = 0;
+        glGetProgramiv(program->gl_handle, GL_ACTIVE_UNIFORM_MAX_LENGTH, &len);
+        std::vector<char> buffer(len);
+
+        ActiveInfo activeInfo;
+        glGetActiveUniform(program->gl_handle, index, buffer.size(), &len, &activeInfo.size, &activeInfo.type, buffer.data());
+        activeInfo.name = std::string(buffer.begin(), buffer.end());
+        return make_node_ptr<ActiveInfo>(activeInfo);
     }
 
     std::vector<node_ptr<Shader>> getAttachedShaders(node_ptr<Program> program)
     {
+        GLsizei len = 0;
+        glGetProgramiv(program->gl_handle, GL_ATTACHED_SHADERS, &len);
+        std::vector<GLuint> buffer(len);
 
+        glGetAttachedShaders(program->gl_handle, buffer.size(), &len, buffer.data());
+        std::vector<node_ptr<Shader>> result;
+        for (auto h : buffer) {
+            auto r = std::find_if(shaders.begin(), shaders.end(),
+                [h](auto &shader) { return shader->gl_handle == h; });
+            if (r != shaders.end()) {
+                result.push_back(*r);
+            }
+        }
+        return result;
     }
 
-    GLint getAttribLocation(node_ptr<Program> program, const std::string &name)
+    GLint getAttribLocation(node_ptr<Program> program, std::string name)
     {
-        glGetAttribLocation(program->gl_handle, name.c_str());
+        return glGetAttribLocation(program->gl_handle, name.c_str());
     }
 
-    napi_value getBufferParameter(GLenum target, GLenum pname)
+    GLint getBufferParameter(GLenum target, GLenum pname)
     {
-
+        GLint result;
+        glGetBufferParameteriv(target, pname, &result);
+        return result;
     }
 
-    napi_value getParameter(GLenum pname)
+    using GetParameterResult = std::variant<
+    >;
+
+    GLint getParameter(GLenum pname)
     {
-
+        return 0;
     }
-
 
     GLenum getError()
     {
         return glGetError();
     }
 
+    using GetFramebufferAttachmentParameterResult = std::variant<
+        GLint,
+        GLenum,
+        node_ptr<Renderbuffer>,
+        node_ptr<Texture>
+    >;
 
-    napi_value getFramebufferAttachmentParameter(GLenum target, GLenum attachment, GLenum pname)
+    GLint getFramebufferAttachmentParameter(GLenum target, GLenum attachment, GLenum pname)
     {
-
+        GLint result;
+        glGetFramebufferAttachmentParameteriv(target, attachment, pname, &result);
+        return result;
     }
 
-    napi_value getProgramParameter(node_ptr<Program> program, GLenum pname)
+    GLint getProgramParameter(node_ptr<Program> program, GLenum pname)
     {
-
+        GLint result;
+        glGetProgramiv(program->gl_handle, pname, &result);
+        return result;
     }
 
     std::string getProgramInfoLog(node_ptr<Program> program)
     {
-        glGetProgramInfoLog(program->gl_handle, );
+        GLsizei len = 0;
+        glGetProgramiv(program->gl_handle, GL_INFO_LOG_LENGTH, &len);
+        std::vector<char> buffer(len);
+
+        glGetProgramInfoLog(program->gl_handle, buffer.size(), &len, buffer.data());
+        return std::string(buffer.begin(), buffer.end());
     }
 
-    napi_value getRenderbufferParameter(GLenum target, GLenum pname)
+    GLint getRenderbufferParameter(GLenum target, GLenum pname)
     {
-        
+        GLint result;
+        glGetRenderbufferParameteriv(target, pname, &result);
+        return result;
     }
 
-    napi_value getShaderParameter(node_ptr<Shader> shader, GLenum pname)
+    GLint getShaderParameter(node_ptr<Shader> shader, GLenum pname)
     {
-
+        GLint result;
+        glGetShaderiv(shader->gl_handle, pname, &result);
+        return result;
     }
 
-    node_ptr<Shader_PrecisionFormat> getShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype)
+    node_ptr<ShaderPrecisionFormat> getShaderPrecisionFormat(GLenum shadertype, GLenum precisiontype)
     {
-
+        ShaderPrecisionFormat shaderPrecisionFormat;
+        GLint range[2] = {};
+        glGetShaderPrecisionFormat(shadertype, precisiontype, range, &shaderPrecisionFormat.precision);
+        shaderPrecisionFormat.rangeMin = range[0];
+        shaderPrecisionFormat.rangeMax = range[1];
+        return make_node_ptr<ShaderPrecisionFormat>(shaderPrecisionFormat);
     }
 
     std::string getShaderInfoLog(node_ptr<Shader> shader)
     {
-        
-    }
+        GLint len = 0;
+        glGetShaderiv(shader->gl_handle, GL_INFO_LOG_LENGTH, &len);
+        std::vector<char> buffer(len);
 
+        glGetShaderInfoLog(shader->gl_handle, buffer.size(), &len, buffer.data());
+        return std::string(buffer.begin(), buffer.end());
+    }
 
     std::string getShaderSource(node_ptr<Shader> shader)
     {
+        GLint len = 0;
+        glGetShaderiv(shader->gl_handle, GL_SHADER_SOURCE_LENGTH, &len);
+        std::vector<char> buffer(len);
 
+        glGetShaderSource(shader->gl_handle, buffer.size(), &len, buffer.data());
+        return std::string(buffer.begin(), buffer.end());
     }
 
-
-    napi_value getTexParameter(GLenum target, GLenum pname)
+    GLint getTexParameter(GLenum target, GLenum pname)
     {
-
+        GLint result;
+        glGetTexParameteriv(target, pname, &result);
+        return result;
     }
 
-
-    napi_value getUniform(node_ptr<Program> program, node_ptr<UniformLocation> location)
+    GLint getUniform(node_ptr<Program> program, node_ptr<UniformLocation> location)
     {
-
+        GLint result;
+        glGetUniformiv(program->gl_handle, location->gl_location, &result);
+        return result;
     }
 
-
-    node_ptr<UniformLocation> getUniformLocation(node_ptr<Program> program, const std::string &name)
+    node_ptr<UniformLocation> getUniformLocation(node_ptr<Program> program, std::string name)
     {
         auto l = glGetUniformLocation(program->gl_handle, name.c_str());
         return make_node_ptr<UniformLocation>(l);
     }
 
-
-    napi_value getVertexAttrib(GLuint index, GLenum pname)
+    GLint getVertexAttrib(GLuint index, GLenum pname)
     {
-
+        GLint result;
+        glGetVertexAttribiv(index, pname, &result);
+        return result;
     }
-
 
     GLintptr getVertexAttribOffset(GLuint index, GLenum pname)
     {
+        throw std::runtime_error("No impl");
     }
-
 
     void hint(GLenum target, GLenum mode)
     {
@@ -563,12 +662,10 @@ namespace webgl
         glPolygonOffset(factor, units);
     }
 
-
-    void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, ArrayBufferView pixels)
+    void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, data_view pixels)
     {
-
+        glReadPixels(x, y, width, height, format, type, pixels.data);
     }
-
 
     void renderbufferStorage(GLenum target, GLenum internalformat, GLsizei width, GLsizei height)
     {
@@ -580,38 +677,36 @@ namespace webgl
         glSampleCoverage(value, invert);
     }
 
-
     void scissor(GLint x, GLint y, GLsizei width, GLsizei height)
     {
         glScissor(x, y, width, height);
     }
 
-
-    void shaderSource(node_ptr<Shader> shader, const std::string &source)
+    void shaderSource(node_ptr<Shader> shader, std::string source)
     {
+        static const std::string header = "#version 330 core\n";
+        static const std::string footer = "";
+        const char *parts[] = { header.c_str(), source.c_str(), footer.c_str() };
+        GLint partLengths[] = { header.size(), source.size(), footer.size() };
         auto p = source.c_str();
         GLint c = source.size();
-        glShaderSource(shader->gl_handle, 1, &p, &c);
+        glShaderSource(shader->gl_handle, 3, parts, partLengths);
     }
-
 
     void stencilFunc(GLenum func, GLint ref, GLuint mask)
     {
         glStencilFunc(func, ref, mask);
     }
 
-
     void stencilFuncSeparate(GLenum face, GLenum func, GLint ref, GLuint mask)
     {
         glStencilFuncSeparate(face, func, ref, mask);
     }
 
-
     void stencilMask(GLuint mask)
     {
         glStencilMask(mask);
     }
-
 
     void stencilMaskSeparate(GLenum face, GLuint mask)
     {
@@ -628,14 +723,9 @@ namespace webgl
         glStencilOpSeparate(face, fail, zfail, zpass);
     }
 
-    void texImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, ArrayBufferView pixels)
+    void texImage2D(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, data_view pixels)
     {
-        glTexImage2D(target, level, internalformat, width, height, border, format, type, );
-    }
-
-    void texImage2D(GLenum target, GLint level, GLint internalformat, GLenum format, GLenum type, TexImageSource source)
-    {
-        glTexImage2D(target, level, internalformat, , , , format, type, );
+        glTexImage2D(target, level, internalformat, width, height, border, format, type, pixels.data);
     }
 
     void texParameterf(GLenum target, GLenum pname, GLfloat param)
@@ -648,14 +738,9 @@ namespace webgl
         glTexParameteri(target, pname, param);
     }
 
-    void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, ArrayBufferView pixels)
+    void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, data_view pixels)
     {
-
-    }
-
-    void texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLenum format, GLenum type, TexImageSource source) // May throw DOMException
-    {
-        glTexSubImage2D(target, level, );
+        glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, pixels.data);
     }
 
     void uniform1f(node_ptr<UniformLocation> location, GLfloat x)
@@ -700,57 +785,57 @@ namespace webgl
 
     void uniform1fv(node_ptr<UniformLocation> location, Float32List v)
     {
-        glUniform1fv(location->gl_location, v.size, v.data);
+        glUniform1fv(location->gl_location, 1, v.data);
     }
 
     void uniform2fv(node_ptr<UniformLocation> location, Float32List v)
     {
-        glUniform2fv(location->gl_location, v.size, v.data);
+        glUniform2fv(location->gl_location, 1, v.data);
     }
 
     void uniform3fv(node_ptr<UniformLocation> location, Float32List v)
     {
-        glUniform3fv(location->gl_location, v.size, v.data);
+        glUniform3fv(location->gl_location, 1, v.data);
     }
 
     void uniform4fv(node_ptr<UniformLocation> location, Float32List v)
     {
-        glUniform4fv(location->gl_location, v.size, v.data);
+        glUniform4fv(location->gl_location, 1, v.data);
     }
 
     void uniform1iv(node_ptr<UniformLocation> location, Int32List v)
     {
-        glUniform1iv(location->gl_location, v.size, v.data);
+        glUniform1iv(location->gl_location, 1, v.data);
     }
 
     void uniform2iv(node_ptr<UniformLocation> location, Int32List v)
     {
-        glUniform2iv(location->gl_location, v.size, v.data);
+        glUniform2iv(location->gl_location, 1, v.data);
     }
 
     void uniform3iv(node_ptr<UniformLocation> location, Int32List v)
     {
-        glUniform3iv(location->gl_location, v.size, v.data);
+        glUniform3iv(location->gl_location, 1, v.data);
     }
 
     void uniform4iv(node_ptr<UniformLocation> location, Int32List v)
     {
-        glUniform4iv(location->gl_location, v.size, v.data);
+        glUniform4iv(location->gl_location, 1, v.data);
     }
 
     void uniformMatrix2fv(node_ptr<UniformLocation> location, GLboolean transpose, Float32List v)
     {
-        glUniformMatrix2fv(location->gl_location, v.size, transpose, v.data);
+        glUniformMatrix2fv(location->gl_location, 1, transpose, v.data);
     }
 
     void uniformMatrix3fv(node_ptr<UniformLocation> location, GLboolean transpose, Float32List v)
     {
-        glUniformMatrix3fv(location->gl_location, v.size, transpose, v.data);
+        glUniformMatrix3fv(location->gl_location, 1, transpose, v.data);
     }
 
     void uniformMatrix4fv(node_ptr<UniformLocation> location, GLboolean transpose, Float32List v)
     {
-        glUniformMatrix4fv(location->gl_location, v.size, transpose, v.data);
+        glUniformMatrix4fv(location->gl_location, 1, transpose, v.data);
     }
 
     void useProgram(node_ptr<Program> program)
@@ -805,71 +890,141 @@ namespace teresa
     { // from WebGL specification 1.0
 #define REGISTER_GL_FUNCTION(webglName, glFunc) set_node_property(env_, object_, u8 ## #webglName, glFunc)
 
-        REGISTER_GL_FUNCTION(activeTexture, glActiveTexture);
-        /*void attachShader(node_ptr<Program> program, node_ptr<Shader> shader);
-        void bindAttribLocation(node_ptr<Program> program, GLuint index, DOMString name);
-        void bindBuffer(GLenum target, node_ptr<Buffer> ? buffer);
-        void bindFramebuffer(GLenum target, node_ptr<FrameBuffer> ? framebuffer);
-        void bindRenderbuffer(GLenum target, node_ptr<RenderBuffer> ? renderbuffer);
-        void bindTexture(GLenum target, node_ptr<Texture> ? texture);
-        void blendColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha);
-        void blendEquation(GLenum mode);
-        void blendEquationSeparate(GLenum modeRGB, GLenum modeAlpha);
-        void blendFunc(GLenum sfactor, GLenum dfactor);
-        void blendFuncSeparate(GLenum srcRGB, GLenum dstRGB,
-            GLenum srcAlpha, GLenum dstAlpha);
-
-        void bufferData(GLenum target, GLsizeiptr size, GLenum usage);
-        void bufferData(GLenum target, [AllowShared] BufferSource ? data, GLenum usage);
-        void bufferSubData(GLenum target, GLintptr offset, [AllowShared] BufferSource data);*/
-
-        REGISTER_GL_FUNCTION(checkFramebufferStatus, glCheckFramebufferStatus);
-        REGISTER_GL_FUNCTION(clear, glClear);
-        REGISTER_GL_FUNCTION(clearColor, glClearColor);
-        REGISTER_GL_FUNCTION(clearDepth, glClearDepth);
-        REGISTER_GL_FUNCTION(clearStencil, glClearStencil);
-        REGISTER_GL_FUNCTION(colorMask, glColorMask);
-        // REGISTER_GL_FUNCTION(compileShader, glCompileShader);
-
+        REGISTER_GL_FUNCTION(getContextAttributes, webgl::getContextAttributes);
+        REGISTER_GL_FUNCTION(isContextLost, webgl::isContextLost);
+        REGISTER_GL_FUNCTION(getSupportedExtensions, webgl::getSupportedExtensions);
+        REGISTER_GL_FUNCTION(getExtension, webgl::getExtension);
+        REGISTER_GL_FUNCTION(activeTexture, webgl::activeTexture);
+        REGISTER_GL_FUNCTION(attachShader, webgl::attachShader);
+        REGISTER_GL_FUNCTION(bindAttribLocation, webgl::bindAttribLocation);
+        REGISTER_GL_FUNCTION(bindBuffer, webgl::bindBuffer);
+        REGISTER_GL_FUNCTION(bindFramebuffer, webgl::bindFramebuffer);
+        REGISTER_GL_FUNCTION(bindRenderbuffer, webgl::bindRenderbuffer);
+        REGISTER_GL_FUNCTION(bindTexture, webgl::bindTexture);
+        REGISTER_GL_FUNCTION(blendColor, webgl::blendColor);
+        REGISTER_GL_FUNCTION(blendEquation, webgl::blendEquation);
+        REGISTER_GL_FUNCTION(blendEquationSeparate, webgl::blendEquationSeparate);
+        REGISTER_GL_FUNCTION(blendFunc, webgl::blendFunc);
+        REGISTER_GL_FUNCTION(blendFuncSeparate, webgl::blendFuncSeparate);
+        REGISTER_GL_FUNCTION(bufferData, webgl::bufferData);
+        REGISTER_GL_FUNCTION(bufferSubData, webgl::bufferSubData);
+        REGISTER_GL_FUNCTION(checkFramebufferStatus, webgl::checkFramebufferStatus);
+        REGISTER_GL_FUNCTION(clear, webgl::clear);
+        REGISTER_GL_FUNCTION(clearColor, webgl::clearColor);
+        REGISTER_GL_FUNCTION(clearDepth, webgl::clearDepth);
+        REGISTER_GL_FUNCTION(clearStencil, webgl::clearStencil);
+        REGISTER_GL_FUNCTION(colorMask, webgl::colorMask);
+        REGISTER_GL_FUNCTION(compileShader, webgl::compileShader);
+        REGISTER_GL_FUNCTION(compressedTexImage2D, webgl::compressedTexImage2D);
+        REGISTER_GL_FUNCTION(compressedTexSubImage2D, webgl::compressedTexSubImage2D);
+        REGISTER_GL_FUNCTION(copyTexImage2D, webgl::copyTexImage2D);
+        REGISTER_GL_FUNCTION(copyTexSubImage2D, webgl::copyTexSubImage2D);
+        REGISTER_GL_FUNCTION(createBuffer, webgl::createBuffer);
+        REGISTER_GL_FUNCTION(createFramebuffer, webgl::createFramebuffer);
+        REGISTER_GL_FUNCTION(createProgram, webgl::createProgram);
+        REGISTER_GL_FUNCTION(createRenderbuffer, webgl::createRenderbuffer);
+        REGISTER_GL_FUNCTION(createShader, webgl::createShader);
+        REGISTER_GL_FUNCTION(createTexture, webgl::createTexture);
+        REGISTER_GL_FUNCTION(cullFace, webgl::cullFace);
+        REGISTER_GL_FUNCTION(deleteBuffer, webgl::deleteBuffer);
+        REGISTER_GL_FUNCTION(deleteFramebuffer, webgl::deleteFramebuffer);
+        REGISTER_GL_FUNCTION(deleteProgram, webgl::deleteProgram);
+        REGISTER_GL_FUNCTION(deleteRenderbuffer, webgl::deleteRenderbuffer);
+        REGISTER_GL_FUNCTION(deleteShader, webgl::deleteShader);
+        REGISTER_GL_FUNCTION(deleteTexture, webgl::deleteTexture);
+        REGISTER_GL_FUNCTION(depthFunc, webgl::depthFunc);
+        REGISTER_GL_FUNCTION(depthMask, webgl::depthMask);
+        REGISTER_GL_FUNCTION(depthRange, webgl::depthRange);
+        REGISTER_GL_FUNCTION(detachShader, webgl::detachShader);
+        REGISTER_GL_FUNCTION(disable, webgl::disable);
+        REGISTER_GL_FUNCTION(disableVertexAttribArray, webgl::disableVertexAttribArray);
+        REGISTER_GL_FUNCTION(drawArrays, webgl::drawArrays);
+        REGISTER_GL_FUNCTION(drawElements, webgl::drawElements);
+        REGISTER_GL_FUNCTION(enable, webgl::enable);
+        REGISTER_GL_FUNCTION(enableVertexAttribArray, webgl::enableVertexAttribArray);
+        REGISTER_GL_FUNCTION(finish, webgl::finish);
+        REGISTER_GL_FUNCTION(flush, webgl::flush);
+        REGISTER_GL_FUNCTION(framebufferRenderbuffer, webgl::framebufferRenderbuffer);
+        REGISTER_GL_FUNCTION(framebufferTexture2D, webgl::framebufferTexture2D);
+        REGISTER_GL_FUNCTION(frontFace, webgl::frontFace);
+        REGISTER_GL_FUNCTION(generateMipmap, webgl::generateMipmap);
+        REGISTER_GL_FUNCTION(getActiveAttrib, webgl::getActiveAttrib);
+        REGISTER_GL_FUNCTION(getActiveUniform, webgl::getActiveUniform);
+        REGISTER_GL_FUNCTION(getAttachedShaders, webgl::getAttachedShaders);
+        REGISTER_GL_FUNCTION(getAttribLocation, webgl::getAttribLocation);
+        REGISTER_GL_FUNCTION(getBufferParameter, webgl::getBufferParameter);
+        REGISTER_GL_FUNCTION(getParameter, webgl::getParameter);
+        REGISTER_GL_FUNCTION(getError, webgl::getError);
+        REGISTER_GL_FUNCTION(getFramebufferAttachmentParameter, webgl::getFramebufferAttachmentParameter);
+        REGISTER_GL_FUNCTION(getProgramParameter, webgl::getProgramParameter);
+        REGISTER_GL_FUNCTION(getProgramInfoLog, webgl::getProgramInfoLog);
+        REGISTER_GL_FUNCTION(getRenderbufferParameter, webgl::getRenderbufferParameter);
+        REGISTER_GL_FUNCTION(getShaderParameter, webgl::getShaderParameter);
+        REGISTER_GL_FUNCTION(getShaderPrecisionFormat, webgl::getShaderPrecisionFormat);
+        REGISTER_GL_FUNCTION(getShaderInfoLog, webgl::getShaderInfoLog);
+        REGISTER_GL_FUNCTION(getShaderSource, webgl::getShaderSource);
+        REGISTER_GL_FUNCTION(getTexParameter, webgl::getTexParameter);
+        REGISTER_GL_FUNCTION(getUniform, webgl::getUniform);
+        REGISTER_GL_FUNCTION(getUniformLocation, webgl::getUniformLocation);
+        REGISTER_GL_FUNCTION(getVertexAttrib, webgl::getVertexAttrib);
+        REGISTER_GL_FUNCTION(getVertexAttribOffset, webgl::getVertexAttribOffset);
+        REGISTER_GL_FUNCTION(hint, webgl::hint);
+        REGISTER_GL_FUNCTION(isBuffer, webgl::isBuffer);
+        REGISTER_GL_FUNCTION(isEnabled, webgl::isEnabled);
+        REGISTER_GL_FUNCTION(isFramebuffer, webgl::isFramebuffer);
+        REGISTER_GL_FUNCTION(isProgram, webgl::isProgram);
+        REGISTER_GL_FUNCTION(isRenderbuffer, webgl::isRenderbuffer);
+        REGISTER_GL_FUNCTION(isShader, webgl::isShader);
+        REGISTER_GL_FUNCTION(isTexture, webgl::isTexture);
+        REGISTER_GL_FUNCTION(lineWidth, webgl::lineWidth);
+        REGISTER_GL_FUNCTION(linkProgram, webgl::linkProgram);
+        REGISTER_GL_FUNCTION(pixelStorei, webgl::pixelStorei);
+        REGISTER_GL_FUNCTION(polygonOffset, webgl::polygonOffset);
+        REGISTER_GL_FUNCTION(readPixels, webgl::readPixels);
+        REGISTER_GL_FUNCTION(renderbufferStorage, webgl::renderbufferStorage);
+        REGISTER_GL_FUNCTION(sampleCoverage, webgl::sampleCoverage);
+        REGISTER_GL_FUNCTION(scissor, webgl::scissor);
+        REGISTER_GL_FUNCTION(shaderSource, webgl::shaderSource);
+        REGISTER_GL_FUNCTION(stencilFunc, webgl::stencilFunc);
+        REGISTER_GL_FUNCTION(stencilFuncSeparate, webgl::stencilFuncSeparate);
+        REGISTER_GL_FUNCTION(stencilMask, webgl::stencilMask);
+        REGISTER_GL_FUNCTION(stencilMaskSeparate, webgl::stencilMaskSeparate);
+        REGISTER_GL_FUNCTION(stencilOp, webgl::stencilOp);
+        REGISTER_GL_FUNCTION(stencilOpSeparate, webgl::stencilOpSeparate);
+        REGISTER_GL_FUNCTION(texImage2D, webgl::texImage2D);
+        REGISTER_GL_FUNCTION(texParameterf, webgl::texParameterf);
+        REGISTER_GL_FUNCTION(texParameteri, webgl::texParameteri);
+        REGISTER_GL_FUNCTION(texSubImage2D, webgl::texSubImage2D);
         REGISTER_GL_FUNCTION(uniform1f, webgl::uniform1f);
         REGISTER_GL_FUNCTION(uniform2f, webgl::uniform2f);
         REGISTER_GL_FUNCTION(uniform3f, webgl::uniform3f);
         REGISTER_GL_FUNCTION(uniform4f, webgl::uniform4f);
-
         REGISTER_GL_FUNCTION(uniform1i, webgl::uniform1i);
         REGISTER_GL_FUNCTION(uniform2i, webgl::uniform2i);
         REGISTER_GL_FUNCTION(uniform3i, webgl::uniform3i);
         REGISTER_GL_FUNCTION(uniform4i, webgl::uniform4i);
-
         REGISTER_GL_FUNCTION(uniform1fv, webgl::uniform1fv);
         REGISTER_GL_FUNCTION(uniform2fv, webgl::uniform2fv);
         REGISTER_GL_FUNCTION(uniform3fv, webgl::uniform3fv);
         REGISTER_GL_FUNCTION(uniform4fv, webgl::uniform4fv);
-
         REGISTER_GL_FUNCTION(uniform1iv, webgl::uniform1iv);
         REGISTER_GL_FUNCTION(uniform2iv, webgl::uniform2iv);
         REGISTER_GL_FUNCTION(uniform3iv, webgl::uniform3iv);
         REGISTER_GL_FUNCTION(uniform4iv, webgl::uniform4iv);
-
-        REGISTER_GL_FUNCTION(uniformMatrix2fv, webgl::uniform2fv);
-        REGISTER_GL_FUNCTION(uniformMatrix3fv, webgl::uniform3fv);
-        REGISTER_GL_FUNCTION(uniformMatrix4fv, webgl::uniform4fv);
-
+        REGISTER_GL_FUNCTION(uniformMatrix2fv, webgl::uniformMatrix2fv);
+        REGISTER_GL_FUNCTION(uniformMatrix3fv, webgl::uniformMatrix3fv);
+        REGISTER_GL_FUNCTION(uniformMatrix4fv, webgl::uniformMatrix4fv);
         REGISTER_GL_FUNCTION(useProgram, webgl::useProgram);
         REGISTER_GL_FUNCTION(validateProgram, webgl::validateProgram);
-
         REGISTER_GL_FUNCTION(vertexAttrib1f, glVertexAttrib1f);
         REGISTER_GL_FUNCTION(vertexAttrib2f, glVertexAttrib2f);
         REGISTER_GL_FUNCTION(vertexAttrib3f, glVertexAttrib3f);
         REGISTER_GL_FUNCTION(vertexAttrib4f, glVertexAttrib4f);
-
         REGISTER_GL_FUNCTION(vertexAttrib1fv, webgl::vertexAttrib1fv);
         REGISTER_GL_FUNCTION(vertexAttrib2fv, webgl::vertexAttrib2fv);
         REGISTER_GL_FUNCTION(vertexAttrib3fv, webgl::vertexAttrib3fv);
         REGISTER_GL_FUNCTION(vertexAttrib4fv, webgl::vertexAttrib4fv);
-
         REGISTER_GL_FUNCTION(vertexAttribPointer, glVertexAttribPointer);
-
         REGISTER_GL_FUNCTION(viewport, glViewport);
 
 #undef REGISTER_GL_FUNCTION
