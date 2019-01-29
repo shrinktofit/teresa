@@ -9,6 +9,7 @@
 #include <functional>
 #include <utility>
 #include <charconv>
+#include <variant>
 
 static_assert(sizeof(std::intptr_t) <= sizeof(std::int64_t));
 
@@ -147,6 +148,22 @@ struct typed_array
     array_buffer underlying_buffer;
 };
 
+using int8_array = typed_array<std::int8_t>;
+
+using uint8_array = typed_array<std::uint8_t>;
+
+using int16_array = typed_array<std::int16_t>;
+
+using uint16_array = typed_array<std::uint16_t>;
+
+using int32_array = typed_array<std::int32_t>;
+
+using uint32_array = typed_array<std::uint32_t>;
+
+using float32_array = typed_array<float>;
+
+using float64_array = typed_array<double>;
+
 template <typename Ty>
 bool check_typed_array_type(napi_typedarray_type dest_)
 {
@@ -202,6 +219,50 @@ struct data_view
     std::size_t offset = 0;
     array_buffer underlying_buffer;
 };
+
+template <typename Ty>
+struct is_node_variant
+    :public std::false_type
+{
+
+};
+
+template <typename ...Ty>
+struct is_node_variant<std::variant<Ty...>>
+    :public std::true_type
+{
+
+};
+
+template <typename Ty>
+constexpr bool is_node_variant_v = is_node_variant<Ty>::value;
+
+template <typename Ty>
+bool is_alternative(napi_env env_, napi_value value_)
+{
+    bool result = false;
+    if constexpr (std::is_same_v<Ty, array_buffer>) {
+        napi_is_arraybuffer(env_, value_, &result);
+    }
+    else if constexpr (std::is_same_v<Ty, data_view>) {
+        napi_is_dataview(env_, value_, &result);
+    }
+    else if constexpr (is_typed_array_v<Ty>) {
+        napi_is_typedarray(env_, value_, &result);
+        if (result) {
+            using ElementType = typename Ty::element_type;
+            auto elementType = napi_typedarray_type::napi_int8_array;
+            napi_get_typedarray_info(env_, value_, &elementType, nullptr, nullptr, nullptr, nullptr);
+            if (!check_typed_array_type<ElementType>(elementType)) {
+                result = false;
+            }
+        }
+    }
+    else {
+        static_assert(false, "Cannot dynamic decide target type.");
+    }
+    return result;
+}
 
 struct global_napi_callback_data {
     std::function<napi_value(napi_env, napi_callback_info)> unpacker;
@@ -304,6 +365,48 @@ napi_value _create_node_method(napi_env env_, ReturnTy (ThisTy::*fx_)(Args...))
     return _create_node_function_like(env_, boundFxGetter);
 }
 
+template <std::size_t I, typename Ty>
+struct _read_variant_node_value_helper
+{
+
+};
+
+template <std::size_t I, typename ...Tys>
+struct _read_variant_node_value_helper<I, std::variant<Tys...>>
+{
+    using Variant = std::variant<Tys...>;
+
+    constexpr static Variant read(napi_env env_, napi_value value_)
+    {
+        if constexpr (I >= sizeof...(Tys)) {
+            // static_assert(false, "!!!");
+            throw std::runtime_error("Not matched alternative.");
+        }
+        else {
+            static_assert(I < sizeof...(Tys), "Miss");
+            using Alternative = std::variant_alternative_t<I, Variant>;
+            if (is_alternative<Alternative>(env_, value_)) {
+                return read_node_value<Alternative>(env_, value_);
+            }
+            else {
+                if constexpr ((I + 1) >= sizeof...(Tys)) {
+                    // static_assert(false, "???");
+                    throw std::runtime_error("Not matched alternative.");
+                }
+                else {
+                    return _read_variant_node_value_helper<I + 1, Variant>::read(env_, value_);
+                }
+            }
+        }
+    }
+};
+
+template <typename Variant>
+Variant _read_variant_node_value(napi_env env_, napi_value value_)
+{
+    return _read_variant_node_value_helper<0, Variant>::read(env_, value_);
+}
+
 template <typename Ty>
 Ty read_node_value(napi_env env_, napi_value value_)
 {
@@ -329,10 +432,12 @@ Ty read_node_value(napi_env env_, napi_value value_)
             if (ec == std::errc()) {
                 napi_throw_error(env_, nullptr, "Type mismatch, failed to convert string to integral.");
             }
+            return i;
         }
         else {
             napi_throw_error(env_, nullptr, "Type mismatch, expect type convertiable to integral.");
         }
+        return Ty(0);
     }
     else if constexpr (std::is_floating_point_v<Ty>) {
         double d = 0;
@@ -391,6 +496,9 @@ Ty read_node_value(napi_env env_, napi_value value_)
         result.data = reinterpret_cast<typename Ty::element_type*>(dataNoType);
         result.underlying_buffer = read_node_value<array_buffer>(env_, ab);
         return result;
+    }
+    else if constexpr (is_node_variant_v<Ty>) {
+        return _read_variant_node_value<Ty>(env_, value_);
     }
     else if constexpr (std::is_pointer_v<Ty>) {
         std::int64_t i = 0;

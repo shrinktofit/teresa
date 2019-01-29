@@ -91,14 +91,6 @@ function main() {
     requestAnimationFrame_2(gl, render);
 }
 
-/**
- * 
- * @param {Float32Array} a 
- */
-function fload32ArrayToDataView(a) {
-    return new DataView(a.buffer);
-}
-
 //
 // initBuffers
 //
@@ -160,7 +152,7 @@ function initBuffers(gl) {
     // shape. We do this by creating a Float32Array from the
     // JavaScript array, then use it to fill the current buffer.
 
-    gl.bufferData(gl.ARRAY_BUFFER, fload32ArrayToDataView(new Float32Array(positions)), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
 
     // Now set up the colors for the faces. We'll use solid colors
     // for each face.
@@ -187,7 +179,7 @@ function initBuffers(gl) {
 
     const colorBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, fload32ArrayToDataView(new Float32Array(colors)), gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colors), gl.STATIC_DRAW);
 
     // Build the element array buffer; this specifies the indices
     // into the vertex arrays for each face's vertices.
@@ -211,7 +203,7 @@ function initBuffers(gl) {
     // Now send the element array to GL
 
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,
-        fload32ArrayToDataView(new Uint16Array(indices)), gl.STATIC_DRAW);
+        new Uint16Array(indices), gl.STATIC_DRAW);
 
     return {
         position: positionBuffer,

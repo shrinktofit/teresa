@@ -121,6 +121,51 @@ namespace webgl
         GLint precision;
     };
 
+    using ArrayBufferView = std::variant<
+        int8_array,
+        uint8_array,
+        int16_array,
+        uint16_array,
+        int32_array,
+        uint32_array,
+        float32_array,
+        float64_array,
+        data_view
+    >;
+
+    using BufferSource = std::variant<
+        int8_array,
+        uint8_array,
+        int16_array,
+        uint16_array,
+        int32_array,
+        uint32_array,
+        float32_array,
+        float64_array,
+        data_view,
+        array_buffer
+    >;
+
+    void* get_data(BufferSource buffersource_)
+    {
+        return std::visit([](const auto &v) -> void* {
+            return reinterpret_cast<void*>(v.data);
+        }, buffersource_);
+    }
+
+    std::size_t get_byte_size(BufferSource buffersource_)
+    {
+        return std::visit([](const auto &v) -> std::size_t {
+            using Ty = std::decay_t<decltype(v)>;
+            if constexpr (is_typed_array_v<Ty>) {
+                return v.size * sizeof(typename Ty::element_type);
+            }
+            else {
+                return v.size;
+            }
+        }, buffersource_);
+    }
+
     node_ptr<ContextAttributes> getContextAttributes()
     {
         return make_node_ptr<ContextAttributes>();
@@ -201,14 +246,14 @@ namespace webgl
         glBlendFuncSeparate(srcRGB, dstRGB, srcAlpha, dstAlpha);
     }
 
-    void bufferData(GLenum target, data_view data, GLenum usage)
+    void bufferData(GLenum target, BufferSource data, GLenum usage)
     {
-        glBufferData(target, data.size, data.data, usage);
+        glBufferData(target, get_byte_size(data), get_data(data), usage);
     }
 
-    void bufferSubData(GLenum target, GLintptr offset, data_view data)
+    void bufferSubData(GLenum target, GLintptr offset, BufferSource data)
     {
-        glBufferSubData(target, offset, data.size, data.data);
+        glBufferSubData(target, offset, get_byte_size(data), get_data(data));
     }
 
     GLenum checkFramebufferStatus(GLenum target)
