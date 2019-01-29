@@ -410,44 +410,50 @@ Variant _read_variant_node_value(napi_env env_, napi_value value_)
 template <typename Ty>
 Ty read_node_value(napi_env env_, napi_value value_)
 {
-    if constexpr (std::is_integral_v<Ty>) {
-        auto type = napi_valuetype::napi_null;
-        napi_typeof(env_, value_, &type);
-        if (type == napi_valuetype::napi_number) {
-            std::int64_t i;
-            napi_get_value_int64(env_, value_, &i);
+    if constexpr (std::is_same_v<Ty, bool>) {
+        napi_value coercedValue = nullptr;
+        auto status = napi_coerce_to_bool(env_, value_, &coercedValue);
+        if (status != napi_status::napi_ok) {
+            napi_throw_error(env_, nullptr, "Conversion to boolean failed.");
+            return Ty();
+        }
+
+        bool b = false;
+        napi_get_value_bool(env_, coercedValue, &b);
+        return b;
+    }
+    else if constexpr (std::is_integral_v<Ty> || std::is_floating_point_v<Ty>) {
+        napi_value coercedValue = nullptr;
+        auto status = napi_coerce_to_number(env_, value_, &coercedValue);
+        if (status != napi_status::napi_ok) {
+            napi_throw_error(env_, nullptr, "Conversion to number failed.");
+            return Ty();
+        }
+
+        if constexpr (std::is_floating_point_v<Ty>) {
+            double d = 0;
+            napi_get_value_double(env_, coercedValue, &d);
+            return static_cast<Ty>(d);
+        }
+        else {
+            std::int64_t i = 0;
+            napi_get_value_int64(env_, coercedValue, &i);
             // TODO: napi_get_value_int32(env_, value_, &result);
             // TODO: napi_get_value_uint32(env_, value_, &result);
             return static_cast<Ty>(i);
         }
-        else if (type == napi_valuetype::napi_boolean) {
-            bool b = false;
-            napi_get_value_bool(env_, value_, &b);
-            return static_cast<Ty>(b);
-        }
-        else if (type == napi_valuetype::napi_string) {
-            Ty i;
-            auto str = read_node_value<std::string>(env_, value_);
-            auto [p, ec] = std::from_chars(str.c_str(), str.c_str() + str.size(), i);
-            if (ec == std::errc()) {
-                napi_throw_error(env_, nullptr, "Type mismatch, failed to convert string to integral.");
-            }
-            return i;
-        }
-        else {
-            napi_throw_error(env_, nullptr, "Type mismatch, expect type convertiable to integral.");
-        }
-        return Ty(0);
-    }
-    else if constexpr (std::is_floating_point_v<Ty>) {
-        double d = 0;
-        napi_get_value_double(env_, value_, &d);
-        return static_cast<Ty>(d);
     }
     else if constexpr (std::is_same_v<Ty, std::string>) {
+        napi_value coercedValue = nullptr;
+        auto status = napi_coerce_to_string(env_, value_, &coercedValue);
+        if (status != napi_status::napi_ok) {
+            napi_throw_error(env_, nullptr, "Conversion to string failed.");
+            return Ty();
+        }
+
         std::vector<char> buf(512);
         std::size_t actualLength = 0;
-        napi_get_value_string_utf8(env_, value_, buf.data(), buf.size(), &actualLength);
+        napi_get_value_string_utf8(env_, coercedValue, buf.data(), buf.size(), &actualLength);
         return Ty(buf.data(), buf.data() + actualLength);
     }
     else if constexpr (is_node_ptr_v<Ty>)
