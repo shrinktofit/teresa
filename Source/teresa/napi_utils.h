@@ -186,8 +186,8 @@ bool check_typed_array_type(napi_typedarray_type dest_)
     case napi_typedarray_type::napi_float64_array:
         return std::is_same_v<Ty, double>;
     case napi_typedarray_type::napi_uint8_clamped_array:
-    case napi_typedarray_type::napi_bigint64_array:
-    case napi_typedarray_type::napi_biguint64_array:
+    // case napi_typedarray_type::napi_bigint64_array:
+    // case napi_typedarray_type::napi_biguint64_array:
         // throw std::runtime_error("Type not supported.");
     default:
         break;
